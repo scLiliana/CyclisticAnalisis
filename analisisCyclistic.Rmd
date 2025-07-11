@@ -1,0 +1,705 @@
+---
+title: "Cyclistic"
+author: "Liliana"
+date: "2025-07-10"
+output: html_document
+---
+
+# Cyclistic
+
+## Escenario
+Eres un analista de datos júnior que trabaja en el equipo de analistas de marketing de Cyclistic, una empresa de bicicletas compartidas de Chicago. La directora de marketing cree que el éxito futuro de la empresa depende de maximizar la cantidad de membresías anuales. Por lo tanto, tu equipo quiere entender qué diferencias existen en el uso de las bicicletas Cyclistic entre los ciclistas ocasionales y los miembros anuales. A través de estos conocimientos, tu equipo diseñará una nueva estrategia de marketing para convertir a los ciclistas ocasionales en miembros anuales. Sin embargo, antes de eso, los ejecutivos de Cyclistic deben aprobar tus recomendaciones; por eso, debes respaldar tu propuesta con una visión convincente de los datos y visualizaciones profesionales de los mismos.
+
+## Tarea empresarial
+La tarea empresarial se centra en utilizar el análisis de datos para entender el comportamiento de los usuarios y guiar una estrategia de marketing que convierta a ciclistas ocasionales en miembros anuales, asegurando el crecimiento sostenible de Cyclistic.
+
+## Fuentes de datos utilizadas
+
+https://divvy-tripdata.s3.amazonaws.com/index.html
+
+Serán utilizados los datos históricos de los viajes de Cyclistic (una empresa ficticia)  proporcionados por Motivate International Inc. Estos son datos públicos y pertinentes para realizar este análisis.
+
+No hay problemas con la credibilidad de estos datos, pues son datos proporcionados de una sola fuente confiable, son originales, entendibles, y actuales. Los datos han sido obtenidos bajo una licencia, respecto a la privacidad los datos han sido tratados para evitar conectar con los datos personales de los usuarios. 
+
+## Primera visualización de los datos
+
+```{r Instalar paquetes}
+#install.packages("tidyverse")
+#install.packages("ggrepel")
+#install.packages("lubridate")
+#install.packages("hms")
+```
+```{r Cargar paquetes}
+library(tidyverse)
+library(ggrepel)
+library(lubridate)
+library(hms)
+library(readr)
+```
+
+Explorando cada archivo descargado (correspondientes a mayo 2024 a abril 2025), cada uno correspondiente a un mes, vemos que los datos están organizados por mes, en tablas donde los nombres de las columnas son: "ride_id", "rideable_type",   "started_at", "ended_at", "start_station_name", "start_station_id", "end_station_name", "end_station_id",   "start_lat", "start_lng", "end_lat", "end_lng", "member_casual". Todas las columnas coinciden en tipo de dato con las de los otros meses, por lo que podemos unir estos datos.
+
+
+Para hacer la primera visualización de los datos, cargarémos los datos descargados y los uniremos en un solo archivo para verificar la integridad de los datos.
+
+```{r Cargar y unir datos de los 12 meses}
+# Crear una lista para almacenar los datos temporales
+datos_combinados <- list()
+
+# Vector con los meses (asumiendo que son consecutivos)
+meses24 <- sprintf("%02d", 5:12) # Formato 01, 02, ..., 12
+
+# Año de los datos 2024
+anio <- "2024"
+
+for (mes in meses24) {
+  # Construir el nombre del archivo
+  nombre_archivo <- paste0("Datos/", anio, mes, "-divvy-tripdata.csv")
+  
+  # Cargar el archivo
+  datos_mes <- read_csv(nombre_archivo)
+  
+  # Almacenar en la lista
+  datos_combinados[[mes]] <- datos_mes
+}
+
+# Vector con los meses (asumiendo que son consecutivos)
+meses25 <- sprintf("%02d", 1:4) # Formato 01, 02, ..., 12
+
+# Año de los datos 2025
+anio <- "2025"
+
+for (mes in meses25) {
+  # Construir el nombre del archivo
+  nombre_archivo <- paste0("Datos/", anio, mes, "-divvy-tripdata.csv")
+  
+  # Cargar el archivo
+  datos_mes <- read_csv(nombre_archivo)
+  
+  # Almacenar en la lista
+  datos_combinados[[mes]] <- datos_mes
+}
+
+# Combinar todos los data frames en uno solo
+datos <- bind_rows(datos_combinados)
+
+# Opcional: guardar el archivo combinado
+write_csv(datos, "Datos/052024_042025.csv")
+```
+
+Cargamos el archivo generado
+
+```{r Cargar datos originales}
+datos <- read_csv("Datos/052024_042025.csv")
+
+```
+Realizamos un exploración de los datos
+```{r Visualización de los datos}
+head(datos)
+```
+
+```{r Exploracion de los datos}
+# Estructura
+str(datos)
+# Variables contenidas
+colnames(datos)
+# Número de datos
+nrow(datos)
+```
+Verificamos la integridad de los datos
+```{r Verificacion de la integridad}
+colSums(is.na(datos))
+```
+Observamos que existen datos que están incompletos, ya que no cuentan con el nombre de la estación de inicio y su id, la estación final y su id, así como las posiciónes de longitud y latitud de los puntos finales. Sin embargo las variables que trabajaremos en este análisis se encuentran completas, por lo que concluimos que los datos cumplen con la integridad necesaria para continuar con el análisis.
+
+## Limpieza / Procesamiento de los datos
+
+(Por cuestiones de recursos, el procesamiento de los datos se realizará por archivo para unirse al final)
+
+Agregamos las columnas ride_length, day_of_week, para el análisis y eliminamos las columnas que no utilizaremos: end_station_id,start_station_id,start_lat, start_lng, end_lat, end_lng. Además verificamos que los datos sean relevantes verificando que ride_length sea mayor que 0.
+
+```{r Procesamiento de los datos}
+#Función para cargar cada archivo descargado y procesarlo
+#para generar un nuevo archivo de datos ya formateados
+formatear_mes <- function(mes, anio){
+  
+  nombre_archivo_original <- paste0("Datos/", anio, mes, "-divvy-tripdata.csv")
+  
+  if(!file.exists(nombre_archivo_original)) {
+    message(paste("Archivo no encontrado:", nombre_archivo_original))
+    return()
+  }
+  
+  message(paste("Procesando:", anio, "-", mes))
+  
+  datos_mes <- read_csv(nombre_archivo_original)
+  
+  nuevos_datos <- datos_mes %>%
+    mutate(
+      ride_length = hms::as_hms(difftime(ended_at, started_at, units = "secs")),
+      date = as.Date(started_at),
+      month = format(as.Date(started_at), "%m"),
+      day_of_week = wday(started_at)
+    )%>%
+    select(-c(end_station_id,start_station_id,start_lat, start_lng, end_lat, end_lng))
+  
+  nuevos_datos_v2 <- nuevos_datos[!(nuevos_datos$ride_length<0),]
+  
+  str(nuevos_datos_v2)
+  
+  nombre_archivo_nuevo <- paste0("Datos/DatosFormateados/", anio, mes, ".csv")
+  write_csv(nuevos_datos_v2, nombre_archivo_nuevo)
+  
+}
+
+
+formatea_datos <- function(mes_inicio, anio_inicio, mes_final, anio_final){
+  
+  # Recibe los datos numéricos enteros del periodo de tiempo que se va a 
+  # procesar, identifica si se trata de un periodo durante el mismo año o
+  # si se trata de años distintos, y formatea mes por mes.
+  
+  
+  # Verificar si es el mismo año
+  if(anio_inicio == anio_final) {
+    meses <- mes_inicio:mes_final
+    for(mes in meses) {
+      mes <- sprintf("%02d", mes)
+      formatear_mes(mes, anio_inicio)
+    }
+    return()
+  }
+  
+  # Procesar múltiples años
+  for(anio in anio_inicio:anio_final) {
+    # Determinar los meses para cada año
+    if(anio == anio_inicio) {
+      meses <- mes_inicio:12
+    } else if(anio == anio_final) {
+      meses <- 1:mes_final
+    } else {
+      meses <- 1:12
+    }
+    
+    for(mes in meses) {
+      mes <- sprintf("%02d", mes)
+      formatear_mes(mes, anio)
+    }
+  }
+}
+
+formatea_datos(5,2024,4,2025)
+
+
+```
+Unimos los datos ya formateados.
+
+```{r Union de los datos procesados}
+
+# Crear una lista para almacenar los datos temporales
+datos_combinados <- list()
+
+# Vector con los meses (asumiendo que son consecutivos)
+meses24 <- sprintf("%02d", 5:12) # Formato 01, 02, ..., 12
+
+# Año de los datos 2024
+anio <- "2024"
+
+for (mes in meses24) {
+  # Construir el nombre del archivo
+  nombre_archivo <- paste0("Datos/DatosFormateados/", anio, mes, ".csv")
+  
+  # Cargar el archivo y asegurar que month sea character
+  datos_mes <- read_csv(nombre_archivo) %>%
+    mutate(month = as.character(month))
+  
+  # Almacenar en la lista
+  datos_combinados[[mes]] <- datos_mes
+}
+
+# Vector con los meses (asumiendo que son consecutivos)
+meses25 <- sprintf("%02d", 1:4) # Formato 01, 02, ..., 12
+
+# Año de los datos 2025
+anio <- "2025"
+
+for (mes in meses25) {
+  # Construir el nombre del archivo
+  nombre_archivo <- paste0("Datos/DatosFormateados/", anio, mes, ".csv")
+  
+  # Cargar el archivo y asegurar que month sea character
+  datos_mes <- read_csv(nombre_archivo) %>%
+    mutate(month = as.character(month))
+  
+  # Almacenar en la lista
+  datos_combinados[[mes]] <- datos_mes
+}
+
+# Combinar todos los data frames en uno solo
+datos <- bind_rows(datos_combinados)
+
+# Opcional: guardar el archivo combinado
+write_csv(datos, "Datos/DatosResumen/052024_042025.csv")
+```
+## Análisis
+
+```{r Cargar los datos preparados}
+
+datos_anio <- read_csv("Datos/DatosResumen/052024_042025.csv")
+
+head(datos_anio)
+```
+```{r Información de los datos, cantidad de datos analizados y fecha}
+datos_analizados <- nrow(datos_anio)
+inicio_periodo <- as.Date(min(datos_anio$started_at))
+termino_periodo <- as.Date(max(datos_anio$started_at))
+
+print("Cantidad de datos analizados:")
+print(datos_analizados)
+
+print(paste0("Del periodo de ", inicio_periodo, " a ", termino_periodo))
+
+```
+```{r Viajes hechos por miembros vs casual}
+
+num_viajes_vs <- datos_anio %>%
+  group_by(member_casual) %>%
+  summarise(
+    total_rides = n(),
+  ) 
+#View(num_viajes_vs)
+pct <- round(num_viajes_vs$total_rides/sum(num_viajes_vs$total_rides)*100)
+etiquetas <- paste(num_viajes_vs$member_casual, pct) 
+etiquetas <- paste(etiquetas,"%",sep="")
+
+ggplot(num_viajes_vs, aes(x="", y = total_rides, fill = member_casual )) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_label_repel(
+    aes(label = etiquetas, y = total_rides),
+    position = position_stack(vjust = 0.5),
+    size = 3,
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    box.padding = 0.3, 
+    point.padding = 0.5,
+    min.segment.length = 0.1,  
+    force = 0.5, 
+    direction = "both"  
+  )  +
+  theme_void() +
+  guides(fill = guide_legend(title = "Tipo cliente")) +
+  labs(title = "Porcentaje de clientes casuales vs miembros")+ 
+  scale_fill_viridis_d() 
+
+```
+```{r Tipos de transporte usados por miembros vs casual}
+ggplot(datos_anio, 
+       aes(x = rideable_type,
+           fill = member_casual)) + 
+  geom_bar(position = position_dodge(width = 0.9)) +
+  geom_label(
+    stat = "count",
+    aes(label = after_stat(count), group = member_casual),  # Crucial: agregar group
+    position = position_dodge(width = 0.9),
+    vjust = -0.1,
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    show.legend = FALSE
+  ) +
+  labs(x = "Tipo de transporte", y = "Número de viajes") +
+  guides(fill = guide_legend(title = "Tipo de cliente")) + 
+  ggtitle("Tipos de transporte usados por miembros vs clientes casuales") +
+  scale_fill_viridis_d() +
+  ylim(0, NA)  # Ajusta automáticamente el límite superior
+```
+
+```{r Porcentajes de transporte usados por miembros}
+rideable_type_vs <- datos_anio %>%
+  group_by(member_casual, rideable_type) %>%
+  summarise(
+    total_rides = n(),
+  ) 
+miembros_type <- rideable_type_vs %>%
+  filter(member_casual == 'member')
+
+miembros_type$pct <- miembros_type$total_rides/sum(miembros_type$total_rides)*100
+miembros_type$etiqueta <- ifelse(miembros_type$pct < 1, 
+                                 paste0(miembros_type$rideable_type, "\n", round(miembros_type$pct, 1), "%"),
+                                 paste0(miembros_type$rideable_type, "\n", round(miembros_type$pct), "%"))
+
+ggplot(miembros_type, aes(x = "", y = total_rides, fill = rideable_type)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = etiqueta), 
+            position = position_stack(vjust = 0.5),
+            size = 3,
+            color = 'white') +
+  theme_void() +
+  guides(fill = guide_legend(title = "Tipo de transporte")) + 
+  labs(title = "Tipo de transporte usado por miembros")+ 
+  scale_fill_viridis_d() 
+```
+```{r Porcentajes de transporte usados por clientes casuales}
+casual_type <- rideable_type_vs %>%
+  filter(member_casual == 'casual')
+
+casual_type$pct <- casual_type$total_rides/sum(casual_type$total_rides)*100
+casual_type$etiqueta <- ifelse(casual_type$pct < 1, 
+                                 paste0(casual_type$rideable_type, "\n", round(casual_type$pct, 1), "%"),
+                                 paste0(casual_type$rideable_type, "\n", round(casual_type$pct), "%"))
+
+ggplot(casual_type, aes(x = "", y = total_rides, fill = rideable_type)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = etiqueta), 
+            position = position_stack(vjust = 0.5),
+            size = 3,
+            color = 'white')  +
+  theme_void() +
+  guides(fill = guide_legend(title = "Tipo de transporte")) + 
+  labs(title = "Tipo de transporte usado por clientes casuales")+ 
+  scale_fill_viridis_d() 
+
+```
+```{r Datos tiempo promedio de uso en general y por tipo de transporte}
+mean_ride_length <- hms::as_hms(mean(datos_anio$ride_length))
+print("El tiempo promedio de viaje es de: ")
+print(mean_ride_length)
+print('El viaje más largo ha sido de: ')
+print(hms::as_hms(max(datos_anio$ride_length)))
+print('El viaje más corto ha sido de: ')
+print(hms::as_hms(min(datos_anio$ride_length)))
+
+```
+
+```{r Tiempo promedio de uso en general y por tipo de transporte}
+
+ride_length_gral <- datos_anio %>%
+  group_by(rideable_type) %>%
+  summarise(
+    total_rides = n(),
+    mean_length = mean(ride_length),
+    max_length = max(ride_length),
+    min_length = min(ride_length)
+  )
+
+ggplot(ride_length_gral, 
+  aes(x = rideable_type, y = hms::as_hms(mean_length), fill = rideable_type)) + 
+  geom_bar(stat = "identity",position="dodge", show.legend = FALSE) + 
+  geom_hline(yintercept = hms::as_hms(mean_ride_length),  
+             color = "black", 
+             linetype = "dashed", 
+             linewidth = 1) +
+  labs(x = "Tipo de transporte", y = "Tiempo promedio (hms)") +
+  ggtitle("Tiempos promedio por transporte usado")+
+  geom_label(stat = 'identity', 
+             aes(label = hms::as_hms(mean_length)), 
+             position = position_dodge(width = 1),
+             vjust = 0,
+             color = "white",
+             fill = scales::alpha("gray20", 0.7),
+             size = 4,
+             label.padding = unit(0.15, "lines")) +
+  annotate("text", 
+           x = Inf, y = hms::as_hms(mean_ride_length), 
+           label = paste("Promedio:", hms::as_hms(mean_ride_length)), 
+           hjust = 1.1, vjust = -0.5, 
+           color = "black")+ 
+  scale_fill_viridis_d() 
+```
+
+```{r Tiempo promedio de uso por tipo de transporte member vs casual}
+ride_length_vs <- datos_anio %>%
+  group_by(member_casual,rideable_type) %>%
+  summarise(
+    total_rides = n(),
+    mean_length = hms::round_hms(hms::as_hms(mean(ride_length)), digits = 0),    
+    max_length = hms::as_hms(max(ride_length)),
+    min_length = hms::as_hms(min(ride_length))
+  ) 
+#View(ride_length_vs)
+
+ggplot(ride_length_vs, 
+       aes(x = rideable_type, y = mean_length,
+           fill=member_casual)) + 
+  geom_bar(stat = "identity", position="dodge") + 
+  labs(x = "Tipo de transporte", y = "Tiempo promedio de viaje") +
+  guides(fill = guide_legend(title = "Tipo de cliente")) + 
+  ggtitle("Tiempos de viaje según el tipo de transporte miembros vs clientes casuales")+
+  geom_label(
+    stat = "identity",
+    aes(label = mean_length),
+    position = position_dodge(width = 0.9),  
+    vjust = -0.3,  
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    label.padding = unit(0.15, "lines"),
+    show.legend = FALSE
+  )  + 
+  scale_fill_viridis_d() 
+
+
+```
+
+```{r Concurrencia por días general}
+concurrencia_dia_gral <- datos_anio %>%
+  group_by(day_of_week) %>%
+  summarise(
+    total_rides = n(),
+  ) %>%
+  mutate(
+    day_name = factor(
+      day_of_week,
+      levels = 1:7,
+      labels = c("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"),
+      ordered = TRUE
+    )
+  )
+concurrencia_dia_gral$pct <- concurrencia_dia_gral$total_rides/sum(concurrencia_dia_gral$total_rides)*100
+concurrencia_dia_gral$etiqueta <- ifelse(concurrencia_dia_gral$pct < 1, 
+                                 paste0(concurrencia_dia_gral$day_name, "\n", round(concurrencia_dia_gral$pct, 1), "%"),
+                                 paste0(concurrencia_dia_gral$day_name, "\n", round(concurrencia_dia_gral$pct), "%"))
+
+ggplot(concurrencia_dia_gral, aes(x = "", y = total_rides, fill = day_name)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = etiqueta), 
+            position = position_stack(vjust = 0.5),
+            size = 3,
+            color = 'white') +
+  theme_void() +
+  guides(fill = guide_legend(title = "Día de la semana")) + 
+  labs(title = "Porcentaje de viajes realizados por día de la semana")
+
+```
+
+```{r Generar resumen de concurrencia de miembros y casual}
+concurrencia_dia_vs <- datos_anio %>%
+  group_by(day_of_week, member_casual) %>%
+  summarise(
+    total_rides = n(),
+  ) %>%
+  mutate(
+    day_name = factor(
+      day_of_week,
+      levels = 1:7,
+      labels = c("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"),
+      ordered = TRUE
+    )
+  )
+head(concurrencia_dia_vs)
+```
+```{r Separacion de members y etiqueta concurrencia}
+rides_day_member <- concurrencia_dia_vs %>%
+  filter(member_casual == 'member')
+
+rides_day_member$pct <- rides_day_member$total_rides/sum(rides_day_member$total_rides)*100
+rides_day_member$etiqueta <- ifelse(
+  rides_day_member$pct < 1,
+  paste0(rides_day_member$day_name, "\n", round(rides_day_member$pct, 1), "%"),
+  paste0(rides_day_member$day_name, "\n", round(rides_day_member$pct), "%")
+)
+
+head(rides_day_member)
+```
+
+
+```{r Concurrencia por días miembros grafica de pastel}
+
+ggplot(rides_day_member, aes(x = "", y = total_rides, fill = day_name)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = etiqueta), 
+            position = position_stack(vjust = 0.5),
+            size = 3,
+            color = 'white') +
+  theme_void() +
+  guides(fill = guide_legend(title = "Día de la semana")) + 
+  labs(title = "Porcentaje de viajes realizados por día de la semana \n por miembros")
+
+```
+```{r Concurrencia por días miembros grafica de barras}
+ggplot(rides_day_member, 
+       aes(x = day_name, y = total_rides,
+           fill=day_name)) + 
+  geom_bar(stat = "identity",  position = position_dodge(width = 0.9)) + 
+  labs(x = "Día de la semana", y = "Número de viajes") +
+  guides(fill = guide_legend(title = "Tipo de cliente")) + 
+  ggtitle("Viajes por día miembros")+
+  geom_label(
+    stat = "identity",
+    aes(label = total_rides),
+    position = position_dodge(width = 0.9),  
+    vjust = -0.3,  
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    label.padding = unit(0.15, "lines"),
+    show.legend = FALSE
+  )
+```
+
+```{r Separacion de casual y etiqueta concurrencia}
+rides_day_casual <- concurrencia_dia_vs %>%
+  filter(member_casual == 'casual')
+
+rides_day_casual$pct <- rides_day_casual$total_rides/sum(rides_day_casual$total_rides)*100
+rides_day_casual$etiqueta <- ifelse(rides_day_casual$pct < 1, 
+                                    paste0(rides_day_casual$day_name, "\n", round(rides_day_casual$pct, 1), "%"),
+                                    paste0(rides_day_casual$day_name, "\n", round(rides_day_casual$pct), "%"))
+
+head(rides_day_casual)
+
+```
+
+```{r Concurrencia por días casual grafica de pastel}
+ggplot(rides_day_casual, aes(x = "", y = total_rides, fill = day_name)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = etiqueta), 
+            position = position_stack(vjust = 0.5),
+            size = 3,
+            color = 'white') +
+  theme_void() +
+  guides(fill = guide_legend(title = "Día de la semana")) + 
+  labs(title = "Porcentaje de viajes realizados por día de la semana \n por clientes casuales")
+
+```
+```{r Concurrencia por días casual grafica de barras}
+
+ggplot(rides_day_casual, 
+       aes(x = day_name, y = total_rides,
+           fill=day_name)) + 
+  geom_bar(stat = "identity", position="dodge") + 
+  labs(x = "Día de la semana", y = "Número de viajes") +
+  guides(fill = guide_legend(title = "Tipo de cliente")) + 
+  ggtitle("Viajes por día clientes casuales")+
+  geom_label(
+    stat = "identity",
+    aes(label = total_rides),
+    position = position_dodge(width = 0.9),  
+    vjust = -0.3,  
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    label.padding = unit(0.15, "lines"),
+    show.legend = FALSE
+  )
+```
+
+```{r Concurrencia de clientes en general según el mes}
+concurrencia_mes_gral <- datos_anio %>%
+  group_by(month) %>%
+  summarise(
+    total_rides = n()
+  ) %>%
+  mutate(month = sprintf("%02d", as.numeric(month))) 
+
+ggplot(concurrencia_mes_gral, 
+       aes(x = month, y = total_rides,
+           fill=month)) + 
+  geom_bar(stat = "identity",  position = position_dodge(width = 0.9)) + 
+  labs(x = "Mes", y = "Número de viajes") + 
+  ggtitle("Viajes por mes clientes en general")+
+  geom_label(
+    stat = "identity",
+    aes(label = total_rides),
+    position = position_dodge(width = 0.9),  
+    vjust = -0.3,  
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    label.padding = unit(0.15, "lines"),
+    show.legend = FALSE
+  )+ 
+  scale_fill_viridis_d() 
+
+
+```
+
+```{r #Concurrencia según el mes MEMBER/CASUAL}
+concurrencia_mes_vs <- datos_anio %>%
+  group_by(month, member_casual) %>%
+  summarise(
+    total_rides = n(),
+  ) %>%
+  mutate(month = sprintf("%02d", as.numeric(month))) 
+
+```
+```{r Concurrencia por mes casual grafica de barras}
+rides_month_casual <- concurrencia_mes_vs %>%
+  filter(member_casual == 'casual')
+
+ggplot(rides_month_casual, 
+       aes(x = month, y = total_rides,
+           fill=month)) + 
+  geom_bar(stat = "identity",  position = position_dodge(width = 0.9)) + 
+  labs(x = "Mes", y = "Número de viajes") +
+  guides(fill = guide_legend(title = "Mes")) + 
+  ggtitle("Viajes por mes clientes casuales")+
+  geom_label(
+    stat = "identity",
+    aes(label = total_rides),
+    position = position_dodge(width = 0.9),  
+    vjust = -0.3,  
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    label.padding = unit(0.15, "lines"),
+    show.legend = FALSE
+  )+ 
+  scale_fill_viridis_d()
+```
+
+
+```{r Concurrencia por mes miembro grafica de barras}
+rides_month_member <- concurrencia_mes_vs %>%
+  filter(member_casual == 'member')
+
+ggplot(rides_month_member, 
+       aes(x = month, y = total_rides,
+           fill=month)) + 
+  geom_bar(stat = "identity",  position = position_dodge(width = 0.9)) + 
+  labs(x = "mes", y = "Número de viajes") +
+  guides(fill = guide_legend(title = "Mes")) + 
+  ggtitle("Viajes por día miembros")+
+  geom_label(
+    stat = "identity",
+    aes(label = total_rides),
+    position = position_dodge(width = 0.9),  
+    vjust = -0.3,  
+    color = "white",
+    fill = scales::alpha("gray20", 0.7),
+    size = 3,
+    label.padding = unit(0.15, "lines"),
+    show.legend = FALSE
+  )+ 
+  scale_fill_viridis_d()
+```
+
+
+
+
+## Conclusión del Análisis
+
+A partir de los datos analizados, identificamos diferencias clave en el comportamiento entre los usuarios **miembros anuales** y los **ciclistas ocasionales (casuales)**, lo que permite orientar estrategias de marketing efectivas para convertir a los casuales en miembros:  
+
+1. **Preferencia por bicicletas eléctricas**: Ambos grupos muestran una clara preferencia por las bicicletas eléctricas (54% miembros, 52% casuales), seguidas de las clásicas. Esto sugiere que destacar la disponibilidad y beneficios de las bicicletas eléctricas en campañas de marketing podría ser un factor atractivo para impulsar conversiones.  
+
+2. **Viajes más largos en usuarios casuales**: Los ciclistas ocasionales realizan viajes más largos, especialmente en bicicletas clásicas. Esto podría indicar que los casuales usan el servicio más para paseos recreativos o turísticos, mientras que los miembros lo hacen para desplazamientos rutinarios (como trabajo o estudios). Una estrategia podría ser resaltar el **ahorro económico** que obtendrían al convertirse en miembros, dado su alto uso.  
+
+3. **Patrón de uso semanal**:  
+   - **Miembros**: Uso constante durante la semana (posiblemente por movilidad laboral/estudios).  
+   - **Casuales**: Mayor uso los fines de semana (domingos y lunes), lo que refuerza la idea de un uso recreativo.  
+
+   **Estrategia recomendada**: Dirigir campañas promocionales los **viernes y sábados**, incentivando la membresía anual con beneficios como descuentos en viajes los fines de semana o acceso prioritario a bicicletas eléctricas.  
+
+### **Recomendaciones Finales**  
+- **Enfoque en ahorro y conveniencia**: Destacar cómo la membresía anual reduce costos para usuarios frecuentes (como los casuales de fines de semana).  
+- **Promociones temporales**: Ofrecer descuentos o períodos de prueba gratuitos de la membresía durante temporadas de alta demanda recreativa (verano, festivos).  
+- **Personalización**: Segmentar campañas según el tipo de bicicleta preferida (ej: "¿Te gustan las bicicletas eléctricas? Con la membresía anual, tienes acceso ilimitado").  
+
+Estas acciones, basadas en datos, podrían incrementar la conversión de ciclistas ocasionales en miembros anuales, asegurando un crecimiento sostenible para Cyclistic.
